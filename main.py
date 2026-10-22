@@ -1,8 +1,10 @@
 import matplotlib.pyplot as plt
 from ultralytics import YOLO
+#from sklearn.metrics.pairwise import cosine_similarity
 
 from src.preprocessing import text_detection, predict, create_char_imgs, create_horizontal_strip
-from src.tesseract import error_check, run_tesseract_on_image
+from src.error_check import error_check
+from src.ocr_crnn import run_text_recognition_crnn
 
 # def argument_parser():
 #     '''Handle command line arguments'''
@@ -16,66 +18,46 @@ from src.tesseract import error_check, run_tesseract_on_image
 #     args = ap.parse_args()
 #     return args
 
-def try_spacing_until_valid(img, component, digits_length, max_spacing=10):
-    """
-    Tăng spacing dần cho đến khi OCR ra kết quả có độ dài mong muốn.
-    """
-    for spacing in range(max_spacing + 1):
-        horizontal_strip = create_horizontal_strip(img, spacing=spacing)
-        if horizontal_strip is None:
-            continue
-        result = run_tesseract_on_image(horizontal_strip, psm=7)
-        if len(result) == digits_length[component]:
-            return result, horizontal_strip, spacing
-    return result, horizontal_strip, spacing  # Fallback to last attempt
-
-
 def main(img_path):
-    model = YOLO('detect/train/weights/best.pt')
-
-    # Detect and predict
+    model = YOLO('../best.pt')
     bboxes, classes, names, confs = text_detection(img_path, model)
-    annotated_image = predict(img_path, bboxes)
+    annotated_image= predict(img_path, bboxes)
+    char_batch = create_char_imgs(img_path, bboxes)
 
     # Ground-truth expected lengths
     digits_length = {'size': 4, 'number': 7, 'company': 4}
+    container_dict = {}
 
-    for p in range(4, 6):  # thử nhiều padding
-        char_batch = create_char_imgs(img_path, bboxes, names, classes, padding=p)
-        container_dict = {}
+    fig, ax = plt.subplots(1, len(char_batch)+1, figsize=(15, 5))
+    ax[0].imshow(annotated_image, cmap='gray')
+    ax[0].axis('off')
+    ax[0].set_title("Annotated Image")
 
-        fig, ax = plt.subplots(1, len(char_batch)+1, figsize=(15, 5))
-        ax[0].imshow(annotated_image, cmap='gray')
-        ax[0].axis('off')
-        ax[0].set_title("Annotated Image")
+    for i, img in enumerate(char_batch):
+        component = names[classes[i]]
 
-        for i, img in enumerate(char_batch):
-            component = names[classes[i]]
+        horizontal_strip = create_horizontal_strip(img)
+        if horizontal_strip is None: 
+            continue
 
-            # Find optimal spacing
-            result, horizontal_strip, spacing = try_spacing_until_valid(
-                img, component, digits_length
-            )
+        result = run_text_recognition_crnn(horizontal_strip)
 
-            # Error checking
-            container_dict[component] = result
-            fixed_container_dict = error_check(container_dict)
+        # Error checking
+        container_dict[component] = result
+        fixed_container_dict = error_check(container_dict)
 
-            # Plot results
-            ax[i+1].imshow(horizontal_strip, cmap='gray')
-            ax[i+1].axis('off')
-            ax[i+1].set_title(f"Result: {fixed_container_dict[component]}")
+        # Plot results
+        ax[i+1].imshow(horizontal_strip, cmap='gray')
+        ax[i+1].axis('off')
+        ax[i+1].set_title(f"Result: {fixed_container_dict[component]}")
 
-            print(f'{fixed_container_dict[component]}, '
-                  f'Length: {digits_length[component]}, '
-                  f'Spacing: {spacing}, Padding: {p}')
+        print(f'{component}: '.title(), f'{fixed_container_dict[component]}, ' f'Length: {digits_length[component]}')
 
-        plt.tight_layout()
-        plt.show()
+    plt.tight_layout()
+    plt.show()
     return fixed_container_dict, horizontal_strip, char_batch
 
-
 if __name__ == '__main__':
-    main('images/2.webp')
+    main('images/1.webp')
     #application()
     #main(args)
